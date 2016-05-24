@@ -1,9 +1,10 @@
 -module(server).
--export([loop/0, start/0).
+-export([start_server/0).
+-behavior(gen_server).
 
-
-start_parallel_server() ->
-  {ok, Listen} = gen_tcp:listen(...),
+start_server() ->
+  {ok, Listen} = gen_tcp:listen(8080,[list, {packet, 0}, {reuseaddr, true}]),
+  io:format("Server started. Listening on port 8080."),
   spawn(fun() -> par_connect(Listen) end).
 
 par_connect(Listen) ->
@@ -13,10 +14,13 @@ par_connect(Listen) ->
 
 loop(Socket) ->
   receive
-    {tcp, _, Bin } ->
+    {connect, Username} -> connect_user(Username, Socket);
+    {disconnect} -> disconnect_user()
+  end.
+
+connect_user(Username, Socket) ->
 
 
-start() ->
-   io:format("Server started."),
-   loop().
+
+
 
