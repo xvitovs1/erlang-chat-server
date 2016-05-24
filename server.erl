@@ -18,6 +18,7 @@ loop(Socket, UsersTabId) ->
             io:format("Message: ~p~n", [Message]),
             {Action, [Username|_]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
             io:format("Username: ~p~n", [Username]),
+            gen_tcp:send(Socket, "You must connect firstrrr!\n"),
             case Action of
                 "connect" -> connect_user(UsersTabId, Username,Socket);
                 _ ->
@@ -27,7 +28,12 @@ loop(Socket, UsersTabId) ->
             end;
         {error, closed} ->
             io:format("error~n"),
-            ok
+            gen_tcp:send(Socket, "error!\n"),
+            ok;
+
+      {tcp, Port, Msg} ->
+            gen_tcp:send(Socket, "a response"),
+            loop(Socket, UsersTabId)
   end.
 
 main_loop(Socket, UsersTabId, Username) ->
