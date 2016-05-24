@@ -30,7 +30,7 @@ if __name__ == "__main__":
             #incoming message from remote server
             if sock == s:
                 data = sock.recv(4096)
-                if not data == b'':
+                if data == b'':
                     print('\nDisconnected from chat server')
                     sys.exit()
                 else:

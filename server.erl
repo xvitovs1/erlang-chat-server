@@ -4,65 +4,64 @@
 start_server() ->
   {ok, Listen} = gen_tcp:listen(8080,[list, {packet, 0},{active, true}, {reuseaddr, true}]),
   io:format("Server started. Listening on port 8080.~n"),
-  UsersTabId = ets:new(users, [bag]),
-  spawn(fun() -> par_connect(Listen, UsersTabId) end).
+  ets:new(users, [set, named_table, public]),
+  spawn(fun() -> par_connect(Listen) end).
 
-par_connect(Listen, UsersTabId) ->
+par_connect(Listen) ->
   {ok, Socket} = gen_tcp:accept(Listen),
-  spawn(fun() -> par_connect(Listen, UsersTabId) end),
-  loop(Socket, UsersTabId).
+  spawn(fun() -> par_connect(Listen) end),
+  loop(Socket).
 
-loop(Socket, UsersTabId) ->
+loop(Socket) ->
   receive
-        {ok, Message} ->
-            io:format("Message: ~p~n", [Message]),
-            {Action, [Username|_]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
-            io:format("Username: ~p~n", [Username]),
-            gen_tcp:send(Socket, "You must connect firstrrr!\n"),
+        {tcp, _, Message} ->
+            {Action, [_|Username]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
             case Action of
-                "connect" -> connect_user(UsersTabId, Username,Socket);
-                _ ->
-                    gen_tcp:send(Socket, "You must connect first!\n"),
-                    io:format("Some problem.~n"),
-                    ok
+                "connect" -> connect_user(remove_new_line(Username),Socket);
+                _ -> gen_tcp:send(Socket, "You must connect first!\n"),
+                     ok
             end;
-        {error, closed} ->
-            io:format("error~n"),
-            gen_tcp:send(Socket, "error!\n"),
-            ok;
-
-      {tcp, Port, Msg} ->
-            gen_tcp:send(Socket, "a response"),
-            loop(Socket, UsersTabId)
+        _ -> gen_tcp:send(Socket, "Error!\n"),
+             ok
   end.
 
-main_loop(Socket, UsersTabId, Username) ->
+main_loop(Socket, Username) ->
    receive
-        {ok, Message} ->
-            io:format("Message: ~p~n", [Message]),
-            {Action, [Content|_]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
+        {tcp, _, Message} ->
+            {Action, [_|Content]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Message),
             case Action of
-                "bcast" -> broadcast_message(UsersTabId, Content),
-                           main_loop(Socket, UsersTabId, Username);
-                "disconnect" -> disconnect_user(UsersTabId, Socket)
+                "bcast" -> broadcast_message(Content),
+                           main_loop(Socket, Username);
+                "send" -> send_message(Username,Content,Socket);
+                "disconnect" -> disconnect_user(Socket)
             end;
-        {error, closed} ->
-            ok
+        _ -> main_loop(Socket, Username)
     end.
 
-connect_user(UsersTabId, Username, Socket) ->
-    broadcast_message(UsersTabId, Username ++ " joined."),
-    ets:insert(UsersTabId, {Username, Socket}),
-    main_loop(Socket, UsersTabId, Username).
+connect_user(Username, Socket) ->
+    case ets:lookup(users,Username) of
+      [] -> broadcast_message(Username ++ " joined.\n"),
+              ets:insert(users, {Username, Socket}),
+              main_loop(Socket, Username);
+      [_|_] -> gen_tcp:send(Socket, "Username already in use!\n"),
+            loop(Socket)
+    end.
 
-disconnect_user(UsersTabId, Socket) ->
-  ets:match_delete(UsersTabId, Socket).
+remove_new_line(Username) ->
+  string:strip(Username, both, $\n).
 
-broadcast_message(UsersTabId, Msg) ->
-    io:format("Broadcasting~n"),
-    ets:foldr(fun({Nick, Socket}, _) ->
+disconnect_user(Socket) ->
+  gen_tcp:send(Socket,"Disconnecting.\n"),
+  ets:match_delete(Socket).
+
+broadcast_message(Msg) ->
+    ets:foldr(fun({_, Socket}, _) ->
         gen_tcp:send(Socket, Msg)
-    end, notused, UsersTabId).
+    end, notused,users).
 
-send_message(From,Socket, Msg) ->
-  gen_tcp:send(Socket,From++ ": " ++ Msg).
+send_message(From,Content,Socket) ->
+  {To,[_|Message]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Content),
+  case ets:lookup(users,To) of
+    [] -> gen_tcp:send(Socket,"User " ++ To ++ " does not exist!\n");
+    [{_,USocket}|_] -> gen_tcp:send(USocket,From++ ": " ++ Message)
+  end.
