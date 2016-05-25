@@ -18,10 +18,10 @@ loop(Socket) ->
             {Action, [_|Username]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
             case Action of
                 "connect" -> connect_user(remove_new_line(Username),Socket);
-                _ -> gen_tcp:send(Socket, "You must connect first!\n"),
+                _ -> gen_tcp:send(Socket, "error:You must connect first!\n"),
                      loop(Socket)
             end;
-        _ -> gen_tcp:send(Socket, "Error!\n"),
+        _ -> gen_tcp:send(Socket, "error:Error!\n"),
              ok
   end.
 
@@ -41,9 +41,10 @@ main_loop(Socket, Username) ->
 connect_user(Username, Socket) ->
     case ets:lookup(users,Username) of
       [] -> broadcast_message(Username ++ " joined.\n"),
-              ets:insert(users, {Username, Socket}),
-              main_loop(Socket, Username);
-      [_|_] -> gen_tcp:send(Socket, "Username already in use!\n"),
+          ets:insert(users, {Username, Socket}),
+          gen_tcp:send(Socket, "info:Username assigned.\n"),
+          main_loop(Socket, Username);
+      [_|_] -> gen_tcp:send(Socket, "error:Username already in use!\n"),
             loop(Socket)
     end.
 
@@ -51,7 +52,7 @@ remove_new_line(Username) ->
   string:strip(Username, both, $\n).
 
 disconnect_user(Socket) ->
-  gen_tcp:send(Socket,"Disconnecting.\n"),
+  gen_tcp:send(Socket,"info:Disconnecting.\n"),
   ets:match_delete(users, Socket).
 
 broadcast_message(Msg) ->
@@ -62,6 +63,6 @@ broadcast_message(Msg) ->
 send_message(From,Content,Socket) ->
   {To,[_|Message]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Content),
   case ets:lookup(users,To) of
-    [] -> gen_tcp:send(Socket,"User " ++ To ++ " does not exist!\n");
+    [] -> gen_tcp:send(Socket, "bcast:User " ++ To ++ " does not exist!\n");
     [{_,USocket}|_] -> gen_tcp:send(USocket,From++ ": " ++ Message)
   end.
