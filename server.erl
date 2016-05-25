@@ -19,7 +19,7 @@ loop(Socket) ->
             case Action of
                 "connect" -> connect_user(remove_new_line(Username),Socket);
                 _ -> gen_tcp:send(Socket, "You must connect first!\n"),
-                     ok
+                     loop(Socket)
             end;
         _ -> gen_tcp:send(Socket, "Error!\n"),
              ok
@@ -52,7 +52,7 @@ remove_new_line(Username) ->
 
 disconnect_user(Socket) ->
   gen_tcp:send(Socket,"Disconnecting.\n"),
-  ets:match_delete(Socket).
+  ets:match_delete(users, Socket).
 
 broadcast_message(Msg) ->
     ets:foldr(fun({_, Socket}, _) ->
