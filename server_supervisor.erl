@@ -1,4 +1,4 @@
--module(supervisor).
+-module(server_supervisor).
 -export([start/0]).
 
 start() ->

@@ -11,9 +11,12 @@ start_server() ->
   end.
 
 par_connect(Listen) ->
-  {ok, Socket} = gen_tcp:accept(Listen),
-  spawn(fun() -> par_connect(Listen) end),
-  loop(Socket).
+  case gen_tcp:accept(Listen) of
+    {ok, Socket} ->   {ok, Socket} = gen_tcp:accept(Listen),
+		      spawn(fun() -> par_connect(Listen) end),
+		      loop(Socket);
+    {error, Reason} -> io:format("error: ~s~n",[Reason])
+  end.
 
 loop(Socket) ->
   receive
