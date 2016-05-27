@@ -46,9 +46,9 @@ main_loop(Socket, Username) ->
 		    end;
 	      _ ->  {Action, [_|Content]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Message),
 		    case Action of
-			"bcast" -> broadcast_message(Content),
+			"bcast" -> broadcast_message(Username,Content),
 				   main_loop(Socket, Username);
-			"send" -> send_message(Username,Content,Socket),
+			"pm" -> send_message(Username,Content,Socket),
 				  main_loop(Socket, Username);
 			"disconnect" -> disconnect_user(Socket)
 		    end
@@ -58,7 +58,7 @@ main_loop(Socket, Username) ->
 
 connect_user(Username, Socket) ->
     case ets:lookup(users,Username) of
-      [] -> broadcast_message(Username ++ " joined.\n"),
+      [] -> broadcast_message(Username,Username ++ " joined.\n"),
           ets:insert(users, {Username, Socket}),
           gen_tcp:send(Socket, "info:Username assigned.\n"),
           main_loop(Socket, Username);
@@ -74,14 +74,14 @@ disconnect_user(Socket) ->
   ets:match_delete(users, Socket),
   gen_tcp:close(Socket).
 
-broadcast_message(Msg) ->
+broadcast_message(From, Msg) ->
     ets:foldr(fun({_, Socket}, _) ->
-        gen_tcp:send(Socket, Msg)
+        gen_tcp:send(Socket, "bcast:" ++ From ++ ": " ++ Msg)
     end, notused,users).
 
 send_message(From,Content,Socket) ->
   {To,[_|Message]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Content),
   case ets:lookup(users,To) of
-    [] -> gen_tcp:send(Socket, "bcast:User " ++ To ++ " does not exist!\n");
-    [{_,USocket}|_] -> gen_tcp:send(USocket,From ++ ": " ++ Message)
+    [] -> gen_tcp:send(Socket, "error:User " ++ To ++ " does not exist!\n");
+    [{_,USocket}|_] -> gen_tcp:send(USocket,"pm:" ++ From ++ ":" ++ Message)
   end.
