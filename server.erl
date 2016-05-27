@@ -2,10 +2,13 @@
 -export([start_server/0]).
 
 start_server() ->
-  {ok, Listen} = gen_tcp:listen(8080,[list, {packet, 0},{active, true}, {reuseaddr, true}]),
-  io:format("Server started. Listening on port 8080.~n"),
-  ets:new(users, [set, named_table, public]),
-  spawn(fun() -> par_connect(Listen) end).
+  case gen_tcp:listen(8080,[list, {packet, 0},{active, true}, {reuseaddr, true}]) of
+    {ok, Listen} ->   io:format("Server started. Listening on port 8080.~n"),
+			    ets:new(users, [set, named_table, public]),
+			    spawn(fun() -> par_connect(Listen) end);
+    {error, Reason} -> io:format("Could not use socket on port 8080: ~s~n",[Reason]),
+			exit(1)
+  end.
 
 par_connect(Listen) ->
   {ok, Socket} = gen_tcp:accept(Listen),
