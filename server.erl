@@ -15,26 +15,38 @@ par_connect(Listen) ->
 loop(Socket) ->
   receive
         {tcp, _, Message} ->
-            {Action, [_|Username]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
-            case Action of
-                "connect" -> connect_user(remove_new_line(Username),Socket);
-                _ -> gen_tcp:send(Socket, "error:You must connect first!\n"),
-                     loop(Socket)
-            end;
+	    case string:chr(Message,$:) of
+	      0 ->  gen_tcp:send(Socket, "error:Unknown message: " ++ Message),
+		    loop(Socket);
+	      _ ->  {Action, [_|Username]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
+		    case Action of
+			"connect" -> connect_user(remove_new_line(Username),Socket);
+			_ -> gen_tcp:send(Socket, "error:You must connect first!\n"),
+			    loop(Socket)
+		    end
+	    end;
         _ -> gen_tcp:send(Socket, "error:Error!\n"),
              ok
   end.
 
 main_loop(Socket, Username) ->
    receive
-        {tcp, _, Message} ->
-            {Action, [_|Content]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Message),
-            case Action of
-                "bcast" -> broadcast_message(Content),
-                           main_loop(Socket, Username);
-                "send" -> send_message(Username,Content,Socket);
-                "disconnect" -> disconnect_user(Socket)
-            end;
+	 {tcp, _, Message} ->
+	    case string:chr(Message,$:) of
+	      0 ->  case remove_new_line(Message) of
+		      "disconnect" -> disconnect_user(Socket);
+		      _ -> gen_tcp:send(Socket, "error:Unknown message: " ++ Message),
+			   main_loop(Socket, Username)
+		    end;
+	      _ ->  {Action, [_|Content]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Message),
+		    case Action of
+			"bcast" -> broadcast_message(remove_new_line(Content)),
+				   main_loop(Socket, Username);
+			"send" -> send_message(Username,remove_new_line(Content),Socket),
+				  main_loop(Socket, Username);
+			"disconnect" -> disconnect_user(Socket)
+		    end
+	    end;
         _ -> main_loop(Socket, Username)
     end.
 
@@ -48,8 +60,8 @@ connect_user(Username, Socket) ->
             loop(Socket)
     end.
 
-remove_new_line(Username) ->
-  string:strip(Username, both, $\n).
+remove_new_line(String) ->
+  string:strip(String, both, $\n).
 
 disconnect_user(Socket) ->
   gen_tcp:send(Socket,"info:Disconnecting.\n"),
@@ -64,5 +76,5 @@ send_message(From,Content,Socket) ->
   {To,[_|Message]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Content),
   case ets:lookup(users,To) of
     [] -> gen_tcp:send(Socket, "bcast:User " ++ To ++ " does not exist!\n");
-    [{_,USocket}|_] -> gen_tcp:send(USocket,From++ ": " ++ Message)
+    [{_,USocket}|_] -> gen_tcp:send(USocket,From ++ ": " ++ Message)
   end.
