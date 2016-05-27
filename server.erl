@@ -4,18 +4,19 @@
 start_server() ->
   case gen_tcp:listen(8080,[list, {packet, 0},{active, true}, {reuseaddr, true}]) of
     {ok, Listen} ->   io:format("Server started. Listening on port 8080.~n"),
-			    ets:new(users, [set, named_table, public]),
-			    spawn(fun() -> par_connect(Listen) end);
+		      ets:new(users, [set, named_table, public]),
+		      server_connections_loop(Listen);
     {error, Reason} -> io:format("Could not use socket on port 8080: ~s~n",[Reason]),
-			exit(1)
+			exit(Reason)
   end.
-
-par_connect(Listen) ->
-  case gen_tcp:accept(Listen) of
-    {ok, Socket} ->   {ok, Socket} = gen_tcp:accept(Listen),
-		      spawn(fun() -> par_connect(Listen) end),
-		      loop(Socket);
-    {error, Reason} -> io:format("error: ~s~n",[Reason])
+  
+server_connections_loop(Listen) ->
+ case gen_tcp:accept(Listen) of
+    {ok, Socket} ->   Pid = spawn(fun() -> loop(Socket) end),
+		      gen_tcp:controlling_process(Socket, Pid),
+		      server_connections_loop(Listen);
+    {error, Reason} -> io:format("error: ~s~n",[Reason]),
+		       exit(Reason)
   end.
 
 loop(Socket) ->
@@ -31,8 +32,7 @@ loop(Socket) ->
 			    loop(Socket)
 		    end
 	    end;
-        _ -> gen_tcp:send(Socket, "error:Error!\n"),
-             ok
+        _ -> io:format(Socket, "error: Socket closed!\n")
   end.
 
 main_loop(Socket, Username) ->
@@ -46,9 +46,9 @@ main_loop(Socket, Username) ->
 		    end;
 	      _ ->  {Action, [_|Content]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Message),
 		    case Action of
-			"bcast" -> broadcast_message(remove_new_line(Content)),
+			"bcast" -> broadcast_message(Content),
 				   main_loop(Socket, Username);
-			"send" -> send_message(Username,remove_new_line(Content),Socket),
+			"send" -> send_message(Username,Content,Socket),
 				  main_loop(Socket, Username);
 			"disconnect" -> disconnect_user(Socket)
 		    end
@@ -71,7 +71,8 @@ remove_new_line(String) ->
 
 disconnect_user(Socket) ->
   gen_tcp:send(Socket,"info:Disconnecting.\n"),
-  ets:match_delete(users, Socket).
+  ets:match_delete(users, Socket),
+  gen_tcp:close(Socket).
 
 broadcast_message(Msg) ->
     ets:foldr(fun({_, Socket}, _) ->
