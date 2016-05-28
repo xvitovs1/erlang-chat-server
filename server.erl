@@ -62,6 +62,7 @@ connect_user(Username, Socket) ->
     [] -> broadcast_message(Username,Username ++ " joined.\n"),
           ets:insert(users, {Username, Socket}),
           gen_tcp:send(Socket, "info:Username assigned.\n"),
+          gen_tcp:send(Socket, "info:Welcome to our chat server.\n"),
           main_loop(Socket, Username);
     [_|_] -> gen_tcp:send(Socket, "error:Username already in use!\n"),
              connect_loop(Socket)

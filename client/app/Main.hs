@@ -5,72 +5,128 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Exception (finally)
 import Control.Concurrent
 import Control.Concurrent.Async (race_)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, elemIndex)
+import Data.String (fromString)
 
 import System.IO
-import Network.Simple.TCP
 import Network
 
 import Graphics.UI.Gtk
 import Graphics.UI.Gtk.Buttons.Button
 
 
-untilM :: Monad m => m Bool -> m ()
-untilM f = do
-  r <- f
-  if r
-    then return ()
-    else untilM f
-
-
 pickUsername handle window = do
-  dia <- dialogNew
-  set dia [ windowTitle := "Pick a username", windowTransientFor := window ]
-
-  hbox <- hBoxNew False 0
-
-  nick <- entryNew
-  label <- labelNew $ Just "Pick a username"
-
-  button <- buttonNew
-  set button [ buttonLabel := "Select" ]
-
-  boxPackStart hbox nick PackGrow 0
-  boxPackEnd hbox button PackNatural 0
-
-  vbox <- vBoxNew False 0
-  boxPackStart vbox label PackNatural 0
-  boxPackEnd vbox hbox PackNatural 0
-
-  w <- dialogGetActionArea dia
-  boxPackEnd (castToBox w) vbox PackNatural 0
-
-  button `on` buttonPressEvent $ liftIO (tellServer dia nick label)
-
-  widgetShowAll dia
-  dialogRun dia
-
+  guiUsernameDialog window callServer
   where
-    tellServer dia nick label = do
-      un <- entryGetText nick
-      hPutStrLn handle ("connect:" ++ un)
+    callServer onError onSuccess username = do
+      hPutStrLn handle ("connect:" ++ username)
       sl <- hGetLine handle
       if "error" `isPrefixOf` sl
-        then do
-          labelSetText label ("Username " ++ un ++ " is already taken. Pick another one.")
-          return False
-        else do
-          widgetDestroy dia
-          return True
-
+        then onError
+        else onSuccess
 
 main :: IO ()
 main = do
+  handle <- connect "localhost" 8080
+  (window, textview) <- guiChat handle
+  pickUsername handle window
+  forkIO $ fromServer handle textview
+
+  widgetShowAll window
+  mainGUI
+
+{- Server IO -}
+
+connect host port = do
   handle <- connectTo "localhost" (PortNumber 8080)
   hSetNewlineMode handle universalNewlineMode
   hSetBuffering handle LineBuffering
+  return handle
+
+fromServer handle textview = do
+  ineof <- hIsEOF handle
+  if ineof
+    then return ()
+    else do
+      line <- hGetLine handle
+      buf <- textViewGetBuffer textview
+      case ':' `elemIndex` line of
+        Just x -> showMessage buf $ drop (x + 1) line
+        Nothing -> return ()
+      fromServer handle textview
+  where
+    showMessage buf line = textBufferInsertAtCursor buf (line ++ "\n")
+
+toServer handle input = do
+  line <- entryGetText input
+  entrySetText input ""
+  case line of
+    "/quit" -> do
+      hPutStrLn handle "disconnect"
+      return ()
+    _ ->  do
+      hPutStrLn handle ("bcast:" ++ line)
+      return ()
 
 
+{- GUI setup -}
+
+filterEnterEvent :: EventM EKey () -> EventM EKey ()
+filterEnterEvent f = do
+  key <- eventKeyName
+  if key == (fromString "Return")
+    then f
+    else return ()
+
+guiUsernameDialog window callServer = do
+  (dialog, entryUsername, buttonSelect, labelText) <- createElements window
+  setSubmitCallbacks callServer dialog entryUsername buttonSelect labelText
+
+  widgetShowAll dialog
+  dialogRun dialog
+
+  where
+    createElements window = do
+      dia <- dialogNew
+      set dia [ windowTitle := "Pick a username", windowTransientFor := window ]
+
+      hbox <- hBoxNew False 0
+
+      nick <- entryNew
+      set nick [ widgetMarginRight := 10 ]
+      label <- labelNew $ Just "Pick a username"
+
+      button <- buttonNew
+      set button [ buttonLabel := "Select" ]
+
+      boxPackStart hbox nick PackGrow 0
+      boxPackEnd hbox button PackNatural 0
+
+      vbox <- vBoxNew False 0
+      boxPackStart vbox label PackNatural 10
+      boxPackEnd vbox hbox PackNatural 0
+
+      w <- dialogGetActionArea dia
+      boxPackEnd (castToBox w) vbox PackNatural 10
+      set dia [ containerBorderWidth := 10 ]
+
+      widgetGrabFocus nick
+
+      return (dia, nick, button, label)
+
+    setSubmitCallbacks callServer dialog entryUsername buttonSelect labelText = do
+      buttonSelect `on` buttonPressEvent $  onPick >> return False
+      entryUsername `on` keyPressEvent $ filterEnterEvent (onPick) >> return False
+
+      where
+        onPick :: EventM any ()
+        onPick = liftIO $ do
+          un <- entryGetText entryUsername
+          callServer (onError un) onSuccess un
+        onError un = labelSetText labelText ("Username " ++ un ++ " is already taken. Pick another one.")
+        onSuccess  = widgetDestroy dialog
+
+guiChat handle = do
   initGUI
   window <- windowNew
   button <- buttonNew
@@ -94,32 +150,10 @@ main = do
   boxPackStart vbox textview PackGrow 0
   boxPackStart vbox hbox PackNatural 0
 
+  input `on` keyPressEvent $ filterEnterEvent (liftIO $ toServer handle input) >> return False
   button `on` buttonPressEvent $ liftIO (toServer handle input) >> return False
   window `on` deleteEvent $ liftIO mainQuit >> return False
 
-  pickUsername handle window
+  widgetGrabFocus input
 
-  forkIO $ fromServer handle textview
-
-  widgetShowAll window
-  mainGUI
-
-fromServer handle textview = do
-  ineof <- hIsEOF handle
-  if ineof
-    then return ()
-    else do
-      line <- hGetLine handle
-      buf <- textViewGetBuffer textview
-      textBufferInsertAtCursor buf (line ++ "\n")
-      fromServer handle textview
-
-toServer handle input = do
-  line <- entryGetText input
-  case line of
-    "/quit" -> do
-      hPutStrLn handle "disconnect"
-      return ()
-    _ ->  do
-      hPutStrLn handle ("bcast:" ++ line)
-      return ()
+  return (window, textview)
