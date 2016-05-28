@@ -9,70 +9,75 @@ start_server() ->
     {error, Reason} -> io:format("Could not use socket on port 8080: ~s~n",[Reason]),
 			exit(Reason)
   end.
-  
+
 server_connections_loop(Listen) ->
  case gen_tcp:accept(Listen) of
-    {ok, Socket} ->   Pid = spawn(fun() -> loop(Socket) end),
+    {ok, Socket} ->   Pid = spawn(fun() -> connect_loop(Socket) end),
 		      gen_tcp:controlling_process(Socket, Pid),
 		      server_connections_loop(Listen);
     {error, Reason} -> io:format("error: ~s~n",[Reason]),
 		       exit(Reason)
   end.
 
-loop(Socket) ->
+connect_loop(Socket) ->
   receive
-        {tcp, _, Message} ->
-	    case string:chr(Message,$:) of
-	      0 ->  gen_tcp:send(Socket, "error:Unknown message: " ++ Message),
-		    loop(Socket);
-	      _ ->  {Action, [_|Username]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
-		    case Action of
-			"connect" -> connect_user(remove_new_line(Username),Socket);
-			_ -> gen_tcp:send(Socket, "error:You must connect first!\n"),
-			    loop(Socket)
-		    end
-	    end;
-        _ -> io:format(Socket, "error: Socket closed!\n")
+    {tcp, _, Message} ->
+      case string:chr(Message,$:) of
+        0 ->  gen_tcp:send(Socket, "error:Unknown message: " ++ Message),
+              connect_loop(Socket);
+        _ ->  {Action, [_|Username]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
+              case Action of
+                "connect" -> connect_user(remove_new_line(Username),Socket);
+                _ -> gen_tcp:send(Socket, "error:You must connect first!\n"),
+                     connect_loop(Socket)
+              end
+      end;
+    _ -> io:format(Socket, "error: Socket closed!\n")
   end.
 
 main_loop(Socket, Username) ->
-   receive
-	 {tcp, _, Message} ->
-	    case string:chr(Message,$:) of
-	      0 ->  case remove_new_line(Message) of
-		      "disconnect" -> disconnect_user(Socket);
-		      _ -> gen_tcp:send(Socket, "error:Unknown message: " ++ Message),
-			   main_loop(Socket, Username)
-		    end;
-	      _ ->  {Action, [_|Content]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Message),
-		    case Action of
-			"bcast" -> broadcast_message(Username,Content),
-				   main_loop(Socket, Username);
-			"pm" -> send_message(Username,Content,Socket),
-				  main_loop(Socket, Username);
-			"disconnect" -> disconnect_user(Socket)
-		    end
-	    end;
-        _ -> main_loop(Socket, Username)
-    end.
+  receive
+    {tcp, _, Message} ->
+      case string:chr(Message,$:) of
+        0 ->  case remove_new_line(Message) of
+                "disconnect" -> disconnect_user(Socket);
+                _ -> gen_tcp:send(Socket, "error:Unknown message: " ++ Message),
+                     main_loop(Socket, Username)
+              end;
+        _ ->  {Action, [_|Content]} = lists:splitwith(fun(L) -> [L] =/= ":" end, Message),
+              case Action of
+                "bcast" -> broadcast_message(Username,Content),
+                           main_loop(Socket, Username);
+                "pm" -> send_message(Username,Content,Socket),
+                        main_loop(Socket, Username);
+                "disconnect" -> disconnect_user(Socket)
+              end
+      end;
+    {tcp_closed, _} -> disconnect_user(Socket);
+    _ -> main_loop(Socket, Username)
+  end.
 
 connect_user(Username, Socket) ->
-    case ets:lookup(users,Username) of
-      [] -> broadcast_message(Username,Username ++ " joined.\n"),
+  case ets:lookup(users,Username) of
+    [] -> broadcast_message(Username,Username ++ " joined.\n"),
           ets:insert(users, {Username, Socket}),
           gen_tcp:send(Socket, "info:Username assigned.\n"),
           main_loop(Socket, Username);
-      [_|_] -> gen_tcp:send(Socket, "error:Username already in use!\n"),
-            loop(Socket)
-    end.
+    [_|_] -> gen_tcp:send(Socket, "error:Username already in use!\n"),
+             connect_loop(Socket)
+  end.
 
 remove_new_line(String) ->
   string:strip(String, both, $\n).
 
 disconnect_user(Socket) ->
+  [[Username]] = ets:match(users, {'$1', Socket}),
   gen_tcp:send(Socket,"info:Disconnecting.\n"),
-  ets:match_delete(users, Socket),
-  gen_tcp:close(Socket).
+  ets:match_delete(users, {'$1', Socket}),
+  gen_tcp:close(Socket),
+  ets:foldr(fun({_, Sockett}, _) ->
+    gen_tcp:send(Sockett, "info:" ++ Username ++ " disconnected.\n")
+  end, notused, users).
 
 broadcast_message(From, Msg) ->
     ets:foldr(fun({_, Socket}, _) ->
