@@ -32,6 +32,7 @@ main = do
   pickUsername handle window
   forkIO $ fromServer handle textview
 
+  windowMaximize window
   widgetShowAll window
   mainGUI
 
@@ -61,7 +62,7 @@ fromServer handle textview = do
         _    -> textBufferInsertAtCursor buf (line ++ "\n")
 
 
-toServer handle inputTo inputText = do
+toServer handle textbuf inputTo inputText = do
   to <- entryGetText inputTo
   text <- entryGetText inputText
   entrySetText inputTo ""
@@ -72,7 +73,9 @@ toServer handle inputTo inputText = do
     _       ->  do
       case to of
         "" -> hPutStrLn handle ("bcast:" ++ text)
-        _  -> hPutStrLn handle ("pm:" ++ to ++ ":" ++ text)
+        _  -> do
+          textBufferInsertAtCursor textbuf ("(private) to " ++ to ++ ": " ++ text ++ "\n")
+          hPutStrLn handle ("pm:" ++ to ++ ":" ++ text ++ "\n")
 
 
 {- GUI setup -}
@@ -164,8 +167,9 @@ guiChat handle = do
   boxPackStart vbox textview PackGrow 0
   boxPackStart vbox hbox PackNatural 0
 
-  input `on` keyPressEvent $ filterEnterEvent (liftIO $ toServer handle to input) >> return False
-  button `on` buttonPressEvent $ liftIO (toServer handle to input) >> return False
+  textbuf <- textViewGetBuffer textview
+  input `on` keyPressEvent $ filterEnterEvent (liftIO $ toServer handle textbuf to input) >> return False
+  button `on` buttonPressEvent $ liftIO (toServer handle textbuf to input) >> return False
   window `on` deleteEvent $ liftIO mainQuit >> return False
 
   widgetGrabFocus input
