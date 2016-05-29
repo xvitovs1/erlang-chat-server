@@ -67,11 +67,12 @@ toServer handle inputTo inputText = do
   entrySetText inputTo ""
   entrySetText inputText ""
   case text of
+    ""      -> return ()
     "/quit" -> hPutStrLn handle "disconnect"
-    _ ->  do
+    _       ->  do
       case to of
-        "" -> hPutStrLn handle ("bcast: " ++ text)
-        _  -> hPutStrLn handle ("pm:" ++ to ++ ": " ++ text)
+        "" -> hPutStrLn handle ("bcast:" ++ text)
+        _  -> hPutStrLn handle ("pm:" ++ to ++ ":" ++ text)
 
 
 {- GUI setup -}
@@ -127,7 +128,9 @@ guiUsernameDialog window callServer = do
         onPick :: EventM any ()
         onPick = liftIO $ do
           un <- entryGetText entryUsername
-          callServer (onError un) onSuccess un
+          if un == ""
+            then return ()
+            else callServer (onError un) onSuccess un
         onError un = labelSetText labelText ("Username " ++ un ++ " is already taken. Pick another one.")
         onSuccess  = widgetDestroy dialog
 
@@ -151,7 +154,7 @@ guiChat handle = do
   set window [ containerBorderWidth := 10, containerChild := vbox ]
   set button [ buttonLabel := "Send" ]
   set textview [ widgetVExpand := True, widgetVExpandSet := True,
-                 widgetMarginBottom := 10 ]
+                 widgetMarginBottom := 10, containerBorderWidth := 5  ]
 
   boxPackStart hbox toLabel PackNatural 0
   boxPackStart hbox to PackNatural 0
