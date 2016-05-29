@@ -51,22 +51,27 @@ fromServer handle textview = do
       line <- hGetLine handle
       buf <- textViewGetBuffer textview
       case ':' `elemIndex` line of
-        Just x -> showMessage buf $ drop (x + 1) line
+        Just x -> showMessage buf (take x line) (drop (x + 1) line)
         Nothing -> return ()
       fromServer handle textview
   where
-    showMessage buf line = textBufferInsertAtCursor buf (line ++ "\n")
+    showMessage buf kind line = do
+      case kind of
+        "pm" -> textBufferInsertAtCursor buf ("(private) " ++ line ++ "\n")
+        _    -> textBufferInsertAtCursor buf (line ++ "\n")
 
-toServer handle input = do
-  line <- entryGetText input
-  entrySetText input ""
-  case line of
-    "/quit" -> do
-      hPutStrLn handle "disconnect"
-      return ()
+
+toServer handle inputTo inputText = do
+  to <- entryGetText inputTo
+  text <- entryGetText inputText
+  entrySetText inputTo ""
+  entrySetText inputText ""
+  case text of
+    "/quit" -> hPutStrLn handle "disconnect"
     _ ->  do
-      hPutStrLn handle ("bcast:" ++ line)
-      return ()
+      case to of
+        "" -> hPutStrLn handle ("bcast: " ++ text)
+        _  -> hPutStrLn handle ("pm:" ++ to ++ ": " ++ text)
 
 
 {- GUI setup -}
@@ -131,6 +136,8 @@ guiChat handle = do
   window <- windowNew
   button <- buttonNew
   input <- entryNew
+  toLabel <- labelNew $ Just "To:"
+  to <- entryNew
   textview <- textViewNew
   textViewSetEditable textview False
   textViewSetCursorVisible textview False
@@ -139,19 +146,23 @@ guiChat handle = do
 
   set input [ widgetHExpand := True, widgetHExpandSet := True,
               widgetMarginRight := 10 ]
+  set toLabel [ widgetMarginRight := 10 ]
+  set to [ widgetMarginRight := 10 ]
   set window [ containerBorderWidth := 10, containerChild := vbox ]
   set button [ buttonLabel := "Send" ]
   set textview [ widgetVExpand := True, widgetVExpandSet := True,
                  widgetMarginBottom := 10 ]
 
+  boxPackStart hbox toLabel PackNatural 0
+  boxPackStart hbox to PackNatural 0
   boxPackStart hbox input PackGrow 0
   boxPackStart hbox button PackNatural 0
 
   boxPackStart vbox textview PackGrow 0
   boxPackStart vbox hbox PackNatural 0
 
-  input `on` keyPressEvent $ filterEnterEvent (liftIO $ toServer handle input) >> return False
-  button `on` buttonPressEvent $ liftIO (toServer handle input) >> return False
+  input `on` keyPressEvent $ filterEnterEvent (liftIO $ toServer handle to input) >> return False
+  button `on` buttonPressEvent $ liftIO (toServer handle to input) >> return False
   window `on` deleteEvent $ liftIO mainQuit >> return False
 
   widgetGrabFocus input
